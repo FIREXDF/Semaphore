@@ -1,6 +1,7 @@
+```yaml
 ---
 - name: Mettre à jour les listes Pi-hole
-  hosts: pihole
+  hosts: all
   become: true
   gather_facts: false
 
@@ -9,8 +10,15 @@
       ansible.builtin.command:
         cmd: pihole -g
       register: pihole_update
-      changed_when: true
+      changed_when: "'List has been updated' in pihole_update.stdout"
 
-    - name: Afficher le résultat
+    - name: Afficher le résumé
+      ansible.builtin.debug:
+        msg:
+          - "DNS : {{ 'OK' if 'DNS resolution is available' in pihole_update.stdout else 'ERREUR' }}"
+          - "Listes modifiées : {{ 'Oui' if 'List has been updated' in pihole_update.stdout else 'Non' }}"
+
+    - name: Afficher la sortie complète de Pi-hole
       ansible.builtin.debug:
         var: pihole_update.stdout_lines
+```
