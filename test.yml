@@ -1,4 +1,8 @@
 ---
+# ============================================================
+# MISE À JOUR DES LXC
+# ============================================================
+
 - name: Mise à jour complète des LXC
   hosts: all
   serial: 1
@@ -43,10 +47,12 @@
     - name: Mettre à niveau tous les paquets
       ansible.builtin.apt:
         upgrade: dist
+      register: apt_upgrade
 
     - name: Supprimer les paquets devenus inutiles
       ansible.builtin.apt:
         autoremove: true
+      register: apt_autoremove
 
     - name: Nettoyer le cache APT
       ansible.builtin.apt:
@@ -73,18 +79,107 @@
 
 
     # ============================================================
-    # RÉSULTAT
+    # CALCUL DU RÉSULTAT
+    # ============================================================
+
+    - name: Calculer le nombre de mises à jour
+      ansible.builtin.set_fact:
+        updates_before_count: >-
+          {{ [0, (updates_before.stdout_lines | length) - 1] | max }}
+
+        updates_after_count: >-
+          {{ [0, (updates_after.stdout_lines | length) - 1] | max }}
+
+        updates_done_count: >-
+          {{ [
+            0,
+            (updates_before.stdout_lines | length) -
+            (updates_after.stdout_lines | length)
+          ] | max }}
+
+        update_status: >-
+          {% if (updates_before.stdout_lines | length) <= 1 %}
+          Aucun changement
+          {% elif (updates_after.stdout_lines | length) <= 1 %}
+          Mise à jour complète
+          {% else %}
+          Mise à jour partielle
+          {% endif %}
+
+
+    # ============================================================
+    # RÉSULTAT LOCAL
     # ============================================================
 
     - name: Afficher le résultat final
       ansible.builtin.debug:
-        msg: >-
-          Mise à jour terminée pour {{ ansible_hostname }}.
-          Vérification effectuée, aucun redémarrage demandé par Ansible.
+        msg:
+          - "Serveur : {{ ansible_hostname }}"
+          - "Mises à jour disponibles : {{ updates_before_count }}"
+          - "Mises à jour effectuées : {{ updates_done_count }}"
+          - "Mises à jour restantes : {{ updates_after_count }}"
+          - "Résultat : {{ update_status }}"
+
+
+# ============================================================
+# NOTIFICATION DISCORD
+# ============================================================
+
+- name: Envoyer le résumé Discord
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    # ============================================================
+    # CONSTRUCTION DU RÉSUMÉ
+    # ============================================================
+
+    - name: Construire le résumé Discord
+      ansible.builtin.set_fact:
+        discord_message: |
+          **ANSIBLE UPDATE**
+
+          {% for host in groups['all'] %}
+          {% if hostvars[host].updates_before_count is defined %}
+
+          {% if hostvars[host].updates_after_count | int == 0 %}
+          🟢 **{{ hostvars[host].ansible_hostname }}**
+          └─ {{ hostvars[host].updates_done_count }} paquet(s) mis à jour
+          └─ 0 mise à jour restante
+          {% elif hostvars[host].updates_before_count | int == 0 %}
+          🔵 **{{ hostvars[host].ansible_hostname }}**
+          └─ Aucune mise à jour disponible
+          {% else %}
+          🟠 **{{ hostvars[host].ansible_hostname }}**
+          └─ {{ hostvars[host].updates_done_count }} paquet(s) mis à jour
+          └─ {{ hostvars[host].updates_after_count }} mise(s) à jour restante(s)
+          {% endif %}
+
+          {% endif %}
+          {% endfor %}
+
+          ---
+          **Résumé**
+          {% set total_before = namespace(value=0) %}
+          {% set total_done = namespace(value=0) %}
+          {% set total_after = namespace(value=0) %}
+
+          {% for host in groups['all'] %}
+          {% if hostvars[host].updates_before_count is defined %}
+          {% set total_before.value = total_before.value + (hostvars[host].updates_before_count | int) %}
+          {% set total_done.value = total_done.value + (hostvars[host].updates_done_count | int) %}
+          {% set total_after.value = total_after.value + (hostvars[host].updates_after_count | int) %}
+          {% endif %}
+          {% endfor %}
+
+          📦 {{ total_done.value }} paquet(s) mis à jour
+          ⚠️ {{ total_after.value }} mise(s) à jour restante(s)
 
 
     # ============================================================
-    # DISCORD
+    # ENVOI DISCORD
     # ============================================================
 
     - name: Envoyer la notification Discord
@@ -94,5 +189,5 @@
         body_format: json
         body:
           username: "Ansible Updates"
-          content: "✅ Mise à jour terminée sur {{ ansible_hostname }}"
+          content: "{{ discord_message }}"
         status_code: 204
