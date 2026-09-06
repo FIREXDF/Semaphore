@@ -10,34 +10,53 @@
   tasks:
 
     # ============================================================
-    # CONSTRUCTION DES FIELDS
+    # INITIALISATION
     # ============================================================
 
-    - name: Construire les champs Discord
+    - name: Initialiser les champs Discord
+      ansible.builtin.set_fact:
+        discord_fields: []
+
+
+    # ============================================================
+    # CONSTRUIRE LES CHAMPS POUR CHAQUE LXC
+    # ============================================================
+
+    - name: Ajouter chaque LXC au résumé
       ansible.builtin.set_fact:
         discord_fields: >-
           {{
-            discord_fields | default([]) +
+            discord_fields +
             [
               {
-                "name": (
-                  "🟢 " ~ hostvars[host].ansible_hostname
-                  if hostvars[host].updates_after_count | int == 0
-                  else
-                  "🔵 " ~ hostvars[host].ansible_hostname
-                  if hostvars[host].updates_before_count | int == 0
-                  else
-                  "🟠 " ~ hostvars[host].ansible_hostname
-                ),
+                "name":
+                  (
+                    "🟢 " ~ (hostvars[host].ansible_hostname | default(host))
+                    if (hostvars[host].updates_after_count | default(0) | int) == 0
+                    and (hostvars[host].updates_before_count | default(0) | int) > 0
+
+                    else
+                    "🔵 " ~ (hostvars[host].ansible_hostname | default(host))
+                    if (hostvars[host].updates_before_count | default(0) | int) == 0
+
+                    else
+                    "🟠 " ~ (hostvars[host].ansible_hostname | default(host))
+                  ),
+
                 "value":
-                  "📦 **" ~ (hostvars[host].updates_done_count | string) ~ "** paquet(s) mis à jour\n"
-                  ~ "⚠️ **" ~ (hostvars[host].updates_after_count | string) ~ "** restante(s)",
+                  "📦 **" ~
+                  (hostvars[host].updates_done_count | default(0) | string) ~
+                  "** paquet(s) mis à jour\n" ~
+
+                  "⚠️ **" ~
+                  (hostvars[host].updates_after_count | default(0) | string) ~
+                  "** mise(s) à jour restante(s)",
+
                 "inline": true
               }
             ]
           }}
       loop: "{{ groups['all'] }}"
-      when: hostvars[host].updates_before_count is defined
       loop_control:
         loop_var: host
 
@@ -83,12 +102,14 @@
             - title: "Ansible Update"
               description: "Mise à jour automatique des LXC terminée."
               fields: "{{ discord_fields }}"
+
               color: >-
                 {{
                   3066993
                   if total_after | int == 0
                   else 15105570
                 }}
+
               footer:
                 text: "Ansible • Mise à jour automatique"
 
