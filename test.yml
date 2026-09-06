@@ -1,20 +1,42 @@
 ---
-- name: Vérifier les mises à jour disponibles
+- name: Mise à jour des LXC
   hosts: all
+  serial: 1
   become: false
-  gather_facts: false
+  gather_facts: true
 
   tasks:
+    - name: Afficher le serveur
+      ansible.builtin.debug:
+        msg: "Mise à jour de {{ ansible_hostname }} ({{ inventory_hostname }})"
+
     - name: Mettre à jour le cache APT
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
 
-    - name: Afficher les paquets pouvant être mis à jour
-      ansible.builtin.shell: apt list --upgradable 2>/dev/null
-      register: updates
+    - name: Lister les paquets pouvant être mis à jour
+      ansible.builtin.shell:
+        cmd: apt list --upgradable 2>/dev/null
+      register: available_updates
       changed_when: false
 
-    - name: Afficher les mises à jour
+    - name: Afficher les mises à jour disponibles
       ansible.builtin.debug:
-        var: updates.stdout_lines
+        msg: "{{ available_updates.stdout_lines }}"
+
+    - name: Mettre à niveau les paquets
+      ansible.builtin.apt:
+        upgrade: dist
+
+    - name: Supprimer les paquets devenus inutiles
+      ansible.builtin.apt:
+        autoremove: true
+
+    - name: Nettoyer le cache APT
+      ansible.builtin.apt:
+        autoclean: true
+
+    - name: Afficher le résultat
+      ansible.builtin.debug:
+        msg: "Mise à jour terminée pour {{ ansible_hostname }}"
