@@ -1,95 +1,3 @@
-# ============================================================
-# NOTIFICATION DISCORD
-# ============================================================
-
-- name: Envoyer le résumé Discord
-  hosts: localhost
-  connection: local
-  gather_facts: false
-
-  tasks:
-
-    # ============================================================
-    # INITIALISATION
-    # ============================================================
-
-    - name: Initialiser les champs Discord
-      ansible.builtin.set_fact:
-        discord_fields: []
-
-
-    # ============================================================
-    # CONSTRUIRE LES CHAMPS POUR CHAQUE LXC
-    # ============================================================
-
-    - name: Ajouter chaque LXC au résumé
-      ansible.builtin.set_fact:
-        discord_fields: >-
-          {{
-            discord_fields +
-            [
-              {
-                "name":
-                  (
-                    "🟢 " ~ (hostvars[host].ansible_hostname | default(host))
-                    if (hostvars[host].updates_after_count | default(0) | int) == 0
-                    and (hostvars[host].updates_before_count | default(0) | int) > 0
-
-                    else
-                    "🔵 " ~ (hostvars[host].ansible_hostname | default(host))
-                    if (hostvars[host].updates_before_count | default(0) | int) == 0
-
-                    else
-                    "🟠 " ~ (hostvars[host].ansible_hostname | default(host))
-                  ),
-
-                "value":
-                  "📦 **" ~
-                  (hostvars[host].updates_done_count | default(0) | string) ~
-                  "** paquet(s) mis à jour\n" ~
-
-                  "⚠️ **" ~
-                  (hostvars[host].updates_after_count | default(0) | string) ~
-                  "** mise(s) à jour restante(s)",
-
-                "inline": true
-              }
-            ]
-          }}
-      loop: "{{ groups['all'] }}"
-      loop_control:
-        loop_var: host
-
-
-    # ============================================================
-    # CALCUL DU RÉSUMÉ GLOBAL
-    # ============================================================
-
-    - name: Calculer le résumé global
-      ansible.builtin.set_fact:
-        total_done: >-
-          {{
-            groups['all']
-            | map('extract', hostvars, 'updates_done_count')
-            | map('default', 0)
-            | map('int')
-            | sum
-          }}
-
-        total_after: >-
-          {{
-            groups['all']
-            | map('extract', hostvars, 'updates_after_count')
-            | map('default', 0)
-            | map('int')
-            | sum
-          }}
-
-
-    # ============================================================
-    # ENVOI DISCORD
-    # ============================================================
-
     - name: Envoyer la notification Discord
       ansible.builtin.uri:
         url: "{{ discord_webhook_url }}"
@@ -97,20 +5,22 @@
         body_format: json
         body:
           username: "Ansible Updates"
-
           embeds:
             - title: "Ansible Update"
               description: "Mise à jour automatique des LXC terminée."
-              fields: "{{ discord_fields }}"
-
               color: >-
                 {{
                   3066993
                   if total_after | int == 0
                   else 15105570
                 }}
-
+              fields: "{{ discord_fields + [
+                {
+                  'name': 'Résumé',
+                  'value': '📦 ' ~ (total_done | string) ~ ' paquet(s) mis à jour | ⚠️ ' ~ (total_after | string) ~ ' mise(s) à jour restante(s) | 🖥️ ' ~ (total_hosts | string) ~ ' LXC traité(s)',
+                  'inline': false
+                }
+              ] }}"
               footer:
                 text: "Ansible • Mise à jour automatique"
-
         status_code: 204
