@@ -1,14 +1,24 @@
 ---
-- name: Mise à jour des LXC
+- name: Mise à jour complète des LXC
   hosts: all
   serial: 1
   become: false
   gather_facts: true
 
   tasks:
+
+    # ============================================================
+    # INFORMATIONS
+    # ============================================================
+
     - name: Afficher le serveur
       ansible.builtin.debug:
         msg: "Mise à jour de {{ ansible_hostname }} ({{ inventory_hostname }})"
+
+
+    # ============================================================
+    # AVANT MISE À JOUR
+    # ============================================================
 
     - name: Mettre à jour le cache APT
       ansible.builtin.apt:
@@ -18,14 +28,19 @@
     - name: Lister les paquets pouvant être mis à jour
       ansible.builtin.shell:
         cmd: apt list --upgradable 2>/dev/null
-      register: available_updates
+      register: updates_before
       changed_when: false
 
     - name: Afficher les mises à jour disponibles
       ansible.builtin.debug:
-        msg: "{{ available_updates.stdout_lines }}"
+        msg: "{{ updates_before.stdout_lines }}"
 
-    - name: Mettre à niveau les paquets
+
+    # ============================================================
+    # MISE À JOUR
+    # ============================================================
+
+    - name: Mettre à niveau tous les paquets
       ansible.builtin.apt:
         upgrade: dist
 
@@ -37,6 +52,32 @@
       ansible.builtin.apt:
         autoclean: true
 
-    - name: Afficher le résultat
+
+    # ============================================================
+    # VÉRIFICATION APRÈS MISE À JOUR
+    # ============================================================
+
+    - name: Vérifier le cache APT après mise à jour
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Vérifier les mises à jour restantes
+      ansible.builtin.shell:
+        cmd: apt list --upgradable 2>/dev/null
+      register: updates_after
+      changed_when: false
+
+    - name: Afficher les mises à jour restantes
       ansible.builtin.debug:
-        msg: "Mise à jour terminée pour {{ ansible_hostname }}"
+        msg: "{{ updates_after.stdout_lines }}"
+
+
+    # ============================================================
+    # RÉSULTAT
+    # ============================================================
+
+    - name: Afficher le résultat final
+      ansible.builtin.debug:
+        msg: >-
+          Mise à jour terminée pour {{ ansible_hostname }}.
+          Vérification effectuée, aucun redémarrage demandé par Ansible.
