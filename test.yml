@@ -83,13 +83,16 @@
           Vérification effectuée, aucun redémarrage demandé par Ansible.
 
 
+    # ============================================================
+    # DISCORD
+    # ============================================================
 
-      - name: Envoyer la notification Discord
-        ansible.builtin.uri:
-          url: "{{ discord_webhook_url }}"
-          method: POST
-          body_format: json
-          body:
-            username: "Ansible Updates"
-            content: "✅ Mise à jour terminée sur {{ ansible_hostname }}"
-          status_code: 204
+    - name: Envoyer la notification Discord
+      ansible.builtin.uri:
+        url: "{{ discord_webhook_url }}"
+        method: POST
+        body_format: json
+        body:
+          username: "Ansible Updates"
+          content: "✅ Mise à jour terminée sur {{ ansible_hostname }}"
+        status_code: 204
