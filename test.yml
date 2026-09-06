@@ -1,3 +1,233 @@
+---
+# ============================================================
+# MISE À JOUR COMPLÈTE DES LXC
+# ============================================================
+
+- name: Mise à jour complète des LXC
+  hosts: all
+  serial: 1
+  become: false
+  gather_facts: true
+
+  tasks:
+
+    # ============================================================
+    # INFORMATIONS
+    # ============================================================
+
+    - name: Afficher le serveur
+      ansible.builtin.debug:
+        msg: "Mise à jour de {{ ansible_hostname }} ({{ inventory_hostname }})"
+
+
+    # ============================================================
+    # AVANT MISE À JOUR
+    # ============================================================
+
+    - name: Mettre à jour le cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Lister les paquets pouvant être mis à jour
+      ansible.builtin.shell:
+        cmd: apt list --upgradable 2>/dev/null
+      register: updates_before
+      changed_when: false
+
+    - name: Afficher les mises à jour disponibles
+      ansible.builtin.debug:
+        msg: "{{ updates_before.stdout_lines }}"
+
+
+    # ============================================================
+    # MISE À JOUR
+    # ============================================================
+
+    - name: Mettre à niveau tous les paquets
+      ansible.builtin.apt:
+        upgrade: dist
+      register: apt_upgrade
+
+    - name: Supprimer les paquets devenus inutiles
+      ansible.builtin.apt:
+        autoremove: true
+      register: apt_autoremove
+
+    - name: Nettoyer le cache APT
+      ansible.builtin.apt:
+        autoclean: true
+
+
+    # ============================================================
+    # VÉRIFICATION APRÈS MISE À JOUR
+    # ============================================================
+
+    - name: Vérifier le cache APT après mise à jour
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Vérifier les mises à jour restantes
+      ansible.builtin.shell:
+        cmd: apt list --upgradable 2>/dev/null
+      register: updates_after
+      changed_when: false
+
+    - name: Afficher les mises à jour restantes
+      ansible.builtin.debug:
+        msg: "{{ updates_after.stdout_lines }}"
+
+
+    # ============================================================
+    # CALCUL DES RÉSULTATS
+    # ============================================================
+
+    - name: Calculer le nombre de mises à jour avant
+      ansible.builtin.set_fact:
+        updates_before_count: >-
+          {{ [0, (updates_before.stdout_lines | length) - 1] | max }}
+
+    - name: Calculer le nombre de mises à jour restantes
+      ansible.builtin.set_fact:
+        updates_after_count: >-
+          {{ [0, (updates_after.stdout_lines | length) - 1] | max }}
+
+    - name: Calculer le nombre de mises à jour effectuées
+      ansible.builtin.set_fact:
+        updates_done_count: >-
+          {{
+            [
+              0,
+              updates_before_count | int - updates_after_count | int
+            ] | max
+          }}
+
+    - name: Déterminer le statut
+      ansible.builtin.set_fact:
+        update_status: >-
+          {% if updates_before_count | int == 0 %}
+          Aucun changement
+          {% elif updates_after_count | int == 0 %}
+          Mise à jour complète
+          {% else %}
+          Mise à jour partielle
+          {% endif %}
+
+
+    # ============================================================
+    # AFFICHER LE RÉSULTAT
+    # ============================================================
+
+    - name: Afficher le résultat final
+      ansible.builtin.debug:
+        msg:
+          - "Serveur : {{ ansible_hostname }}"
+          - "Mises à jour disponibles : {{ updates_before_count }}"
+          - "Mises à jour effectuées : {{ updates_done_count }}"
+          - "Mises à jour restantes : {{ updates_after_count }}"
+          - "Résultat : {{ update_status }}"
+
+
+# ============================================================
+# NOTIFICATION DISCORD
+# ============================================================
+
+- name: Envoyer le résumé Discord
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    # ============================================================
+    # INITIALISATION
+    # ============================================================
+
+    - name: Initialiser les champs Discord
+      ansible.builtin.set_fact:
+        discord_fields: []
+
+
+    # ============================================================
+    # AJOUTER CHAQUE LXC
+    # ============================================================
+
+    - name: Ajouter chaque LXC au résumé Discord
+      ansible.builtin.set_fact:
+        discord_fields: >-
+          {{
+            discord_fields +
+            [
+              {
+                "name":
+                  (
+                    "🟢 " ~ (hostvars[host].ansible_hostname | default(host))
+                    if (hostvars[host].updates_after_count | default(0) | int) == 0
+                    and (hostvars[host].updates_before_count | default(0) | int) > 0
+
+                    else
+                    "🔵 " ~ (hostvars[host].ansible_hostname | default(host))
+                    if (hostvars[host].updates_before_count | default(0) | int) == 0
+
+                    else
+                    "🟠 " ~ (hostvars[host].ansible_hostname | default(host))
+                  ),
+
+                "value":
+                  "📦 " ~
+                  (hostvars[host].updates_done_count | default(0) | string) ~
+                  " paquet(s) mis à jour" ~
+                  " | ⚠️ " ~
+                  (hostvars[host].updates_after_count | default(0) | string) ~
+                  " restante(s)",
+
+                "inline": true
+              }
+            ]
+          }}
+      loop: "{{ groups['all'] }}"
+      loop_control:
+        loop_var: host
+
+
+    # ============================================================
+    # CALCUL DU TOTAL
+    # ============================================================
+
+    - name: Calculer le total des paquets mis à jour
+      ansible.builtin.set_fact:
+        total_done: >-
+          {{
+            groups['all']
+            | map('extract', hostvars, 'updates_done_count')
+            | map('default', 0)
+            | map('int')
+            | sum
+          }}
+
+    - name: Calculer le total des mises à jour restantes
+      ansible.builtin.set_fact:
+        total_after: >-
+          {{
+            groups['all']
+            | map('extract', hostvars, 'updates_after_count')
+            | map('default', 0)
+            | map('int')
+            | sum
+          }}
+
+    - name: Compter les LXC
+      ansible.builtin.set_fact:
+        total_hosts: >-
+          {{
+            groups['all'] | length
+          }}
+
+
+    # ============================================================
+    # ENVOYER LE MESSAGE DISCORD
+    # ============================================================
+
     - name: Envoyer la notification Discord
       ansible.builtin.uri:
         url: "{{ discord_webhook_url }}"
@@ -5,22 +235,28 @@
         body_format: json
         body:
           username: "Ansible Updates"
+
           embeds:
+
             - title: "Ansible Update"
               description: "Mise à jour automatique des LXC terminée."
+
               color: >-
                 {{
                   3066993
                   if total_after | int == 0
                   else 15105570
                 }}
-              fields: "{{ discord_fields + [
-                {
-                  'name': 'Résumé',
-                  'value': '📦 ' ~ (total_done | string) ~ ' paquet(s) mis à jour | ⚠️ ' ~ (total_after | string) ~ ' mise(s) à jour restante(s) | 🖥️ ' ~ (total_hosts | string) ~ ' LXC traité(s)',
-                  'inline': false
-                }
-              ] }}"
+
+              fields: "{{ discord_fields }}"
+
+              fields_append:
+                - name: "Résumé"
+                  value: >-
+                    📦 {{ total_done }} paquet(s) mis à jour | ⚠️ {{ total_after }} mise(s) à jour restante(s) | 🖥️ {{ total_hosts }} LXC traité(s)
+                  inline: false
+
               footer:
                 text: "Ansible • Mise à jour automatique"
+
         status_code: 204
